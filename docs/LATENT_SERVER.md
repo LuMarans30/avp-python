@@ -82,10 +82,19 @@ save VRAM.
 
 On the **llama.cpp/GGUF** backend the cross-model projection is chosen from the
 two vocabularies: vocabulary-mediated when the token maps are identical (e.g.
-two Qwen sizes), and shared-token `vocab_overlap_projection` when they differ
-(e.g. BPE vs SentencePiece). Cross-model transfer carries a **single projected
-hidden vector**, so it suits structured reasoning (math, code) better than
-verbatim recall or comprehension, where a full KV-cache would be needed.
+two Qwen sizes), and a shared-token projection when they differ (e.g. BPE vs
+SentencePiece). The shared-token projection map is built once per model pair and
+cached under `$AVP_CACHE_DIR/gguf_maps`, so the embedding dequantization is a
+one-time cost. Pick the method with `--projection-method`:
+
+* `vocab_overlap` (default) — softmax over shared-token logits.
+* `linear` — a ridge-regression map fitted on paired shared-token embeddings;
+  measurably better alignment on held-out tokens.
+
+Cross-model transfer carries a **projected hidden trajectory** (the per-step
+latent states, or a single vector when unavailable), so it suits structured
+reasoning (math, code) better than verbatim recall or comprehension, where a
+full KV-cache would be needed.
 
 ### Why there is no hidden-state serialization
 

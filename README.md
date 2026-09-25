@@ -127,6 +127,8 @@ See **[Framework Integration Guide](docs/FRAMEWORK_INTEGRATION.md)** for per-eng
 - **[AVP Specification](https://github.com/VectorArc/avp-spec)** – binary format, handshake, transport
 - **[Benchmarks](docs/BENCHMARKS.md)** – 7 benchmarks, 5 models, 2 families
 - **[Framework Integration](docs/FRAMEWORK_INTEGRATION.md)** – engines, frameworks, per-engine examples
+- **[Latent Server (MCP + Pi)](docs/LATENT_SERVER.md)** – persistent daemon exposing `latent_think`/`latent_generate`, plus the [Pi extension](pi-extension/)
+- **[Cross-Model Transfer](docs/CROSS_MODEL_TRANSFER.md)** – findings on payload, injection, and translation fidelity, with a gated plan for a learned translator
 - **[Examples](examples/)** – quickstart, cross-model, and agent demos
 - **[CHANGELOG](CHANGELOG.md)**
 

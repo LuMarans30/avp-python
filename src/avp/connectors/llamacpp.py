@@ -113,6 +113,8 @@ class LlamaCppConnector(EngineConnector):
         n_ctx: int = 4096,
         n_gpu_layers: int = -1,
         verbose: bool = False,
+        projection_method: str = "vocab_overlap",
+        projection_ridge: float = 1e-3,
         **kwargs: Any,
     ):
         if not HAS_LLAMACPP:
@@ -127,6 +129,8 @@ class LlamaCppConnector(EngineConnector):
         self._verbose = verbose
         self._n_ctx = n_ctx
         self._n_gpu_layers = n_gpu_layers
+        self._projection_method = projection_method
+        self._projection_ridge = projection_ridge
         self._init_kwargs = kwargs
 
         # Load model with embedding=True to enable hidden state extraction
@@ -175,6 +179,8 @@ class LlamaCppConnector(EngineConnector):
         n_ctx: int = 4096,
         n_gpu_layers: int = -1,
         verbose: bool = False,
+        projection_method: str = "vocab_overlap",
+        projection_ridge: float = 1e-3,
         **kwargs: Any,
     ) -> "LlamaCppConnector":
         """Load a GGUF model for latent communication.
@@ -193,6 +199,8 @@ class LlamaCppConnector(EngineConnector):
             n_ctx=n_ctx,
             n_gpu_layers=n_gpu_layers,
             verbose=verbose,
+            projection_method=projection_method,
+            projection_ridge=projection_ridge,
             **kwargs,
         )
 
@@ -306,8 +314,11 @@ class LlamaCppConnector(EngineConnector):
 
         # --- Latent thinking via run_latent_steps ---
         n_past_before_steps = n_past
+        collected_states: list = []
         if steps > 0:
-            hidden, n_past = self.run_latent_steps(think_ctx, n_past, steps)
+            hidden, n_past = self.run_latent_steps(
+                think_ctx, n_past, steps, state_callback=collected_states.append,
+            )
             if hidden is None:
                 logger.warning("think(): latent steps failed")
                 if owns_context:
@@ -328,6 +339,10 @@ class LlamaCppConnector(EngineConnector):
                 normalize_to_target(hidden, target_norm), dtype=np.float32,
             )
 
+        hidden_states = (
+            np.concatenate(collected_states, axis=0) if collected_states else None
+        )
+
         # --- Build return context ---
         resolved_payload = output.resolve()
 
@@ -345,6 +360,7 @@ class LlamaCppConnector(EngineConnector):
                 hidden_dim=n_embd,
                 num_layers=self._n_layer or 0,
                 last_hidden_state=hidden,
+                hidden_states=hidden_states,
             )
 
         result = AVPContext(
@@ -355,6 +371,7 @@ class LlamaCppConnector(EngineConnector):
             hidden_dim=n_embd,
             num_layers=self._n_layer or 0,
             last_hidden_state=hidden,
+            hidden_states=hidden_states,
         )
         result._llamacpp_ctx = think_ctx
         result._llamacpp_n_past = n_past
@@ -576,9 +593,13 @@ class LlamaCppConnector(EngineConnector):
                 list(kwargs.keys()),
             )
 
+        # Cross-model projection consumes the source hidden state, not the
+        # source's live KV-cache, so skip the same-model fast path.
+        cross_family = cross_model and source is not None
+
         # Check for a live think context (full KV-cache path)
         think_ctx = getattr(context, "_llamacpp_ctx", None)
-        if think_ctx is not None:
+        if think_ctx is not None and not cross_family:
             return self._generate_on_think_ctx(
                 prompt, context, max_tokens, temperature, top_p,
                 grammar=grammar, keep_context=keep_context,
@@ -591,20 +612,24 @@ class LlamaCppConnector(EngineConnector):
             )
 
         # No live context — use embedding injection (hidden state path).
-        # Works for both same-model (output="hidden_state") and cross-model.
-        hidden = getattr(context, "last_hidden_state", None)
-        if hidden is None:
-            output = self._model(
-                prompt,
-                max_tokens=max_tokens,
-                temperature=temperature,
-                top_p=top_p,
-                **kwargs,
-            )
-            return output["choices"][0]["text"]
-
-        if cross_model and source is not None:
-            hidden = self._project_rosetta(hidden, source)
+        # Works for same-model (output="hidden_state") and cross-model.
+        # Cross-model prefers the full per-step trajectory when available.
+        states = getattr(context, "hidden_states", None)
+        if cross_family and states is not None:
+            hidden = self._project_rosetta(states, source)
+        else:
+            hidden = getattr(context, "last_hidden_state", None)
+            if hidden is None:
+                output = self._model(
+                    prompt,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                    top_p=top_p,
+                    **kwargs,
+                )
+                return output["choices"][0]["text"]
+            if cross_family:
+                hidden = self._project_rosetta(hidden, source)
 
         return self._generate_with_embedding(
             prompt, hidden, max_tokens, temperature, top_p,
@@ -665,10 +690,13 @@ class LlamaCppConnector(EngineConnector):
         Creates a dedicated context (not shared with the model's
         internal context) so concurrent calls don't corrupt state.
 
+        ``embedding`` may be ``[D]`` (single vector) or ``[S, D]`` (a short
+        trajectory from cross-model multi-state projection).
+
         Pipeline:
-        1. Inject embedding as position 0 via batch.embd
-        2. Decode prompt tokens at positions 1..L
-        3. Autoregressive generation from position L+1
+        1. Inject S embeddings at positions 0..S-1 via batch.embd
+        2. Decode prompt tokens at positions S..S+L-1
+        3. Autoregressive generation from position S+L
         """
         import ctypes
         import numpy as np
@@ -682,11 +710,12 @@ class LlamaCppConnector(EngineConnector):
             emb_np = embedding.detach().cpu().float().numpy()
         else:
             emb_np = np.asarray(embedding, dtype=np.float32)
-        emb_np = emb_np.reshape(-1).astype(np.float32)
-        if emb_np.shape[0] != n_embd:
+        if emb_np.ndim == 1:
+            emb_np = emb_np.reshape(1, -1)
+        if emb_np.ndim != 2 or emb_np.shape[1] != n_embd:
             logger.warning(
-                "Embedding dim %d != model n_embd %d, skipping injection",
-                emb_np.shape[0], n_embd,
+                "Embedding shape %s != [S, %d], skipping injection",
+                emb_np.shape, n_embd,
             )
             output = self._model(
                 prompt, max_tokens=max_tokens, temperature=temperature,
@@ -707,19 +736,26 @@ class LlamaCppConnector(EngineConnector):
             return output["choices"][0]["text"]
 
         try:
-            # Step 1: Inject embedding at position 0 via batch.embd
-            emb_batch = llama_cpp.llama_batch_init(1, n_embd, 1)
+            # Step 1: Inject S embeddings at positions 0..S-1 via batch.embd.
+            # Match the model's own input-embedding scaling (e.g. Gemma).
+            emb_np = np.ascontiguousarray(emb_np, dtype=np.float32)
+            scale = self._embedding_scale()
+            if scale != 1.0:
+                emb_np = emb_np * scale
+            n_states = int(emb_np.shape[0])
+            emb_batch = llama_cpp.llama_batch_init(n_states, n_embd, 1)
             try:
                 ctypes.memmove(
                     emb_batch.embd,
                     emb_np.ctypes.data_as(ctypes.POINTER(ctypes.c_float)),
-                    ctypes.sizeof(ctypes.c_float) * n_embd,
+                    ctypes.sizeof(ctypes.c_float) * n_embd * n_states,
                 )
-                emb_batch.n_tokens = 1
-                emb_batch.pos[0] = 0
-                emb_batch.seq_id[0][0] = 0
-                emb_batch.n_seq_id[0] = 1
-                emb_batch.logits[0] = 0  # No logits needed for prefix
+                emb_batch.n_tokens = n_states
+                for i in range(n_states):
+                    emb_batch.pos[i] = i
+                    emb_batch.seq_id[i][0] = 0
+                    emb_batch.n_seq_id[i] = 1
+                    emb_batch.logits[i] = 0  # No logits needed for prefix
 
                 rc = llama_cpp.llama_decode(ctx, emb_batch)
                 if rc != 0:
@@ -741,7 +777,7 @@ class LlamaCppConnector(EngineConnector):
             try:
                 for i, tok in enumerate(tokens):
                     tok_batch.token[i] = tok
-                    tok_batch.pos[i] = i + 1  # offset by 1 for embedding prefix
+                    tok_batch.pos[i] = i + n_states  # offset by the embedding prefix
                     tok_batch.seq_id[i][0] = 0
                     tok_batch.n_seq_id[i] = 1
                     tok_batch.logits[i] = 1 if i == n_prompt - 1 else 0
@@ -757,7 +793,7 @@ class LlamaCppConnector(EngineConnector):
             # Step 3: Autoregressive generation with text-based stop detection
             vocab = llama_cpp.llama_model_get_vocab(model_ptr) if grammar else None
             sampler = self._make_sampler(llama_cpp, temperature, top_p, grammar=grammar, vocab=vocab)
-            n_cur = 1 + n_prompt  # current position (1 embd + L prompt)
+            n_cur = n_states + n_prompt  # current position (S embd + L prompt)
             stop_tokens = self._get_stop_tokens()
             stop_strings = self._get_stop_strings()
             generated_text = ""
@@ -1017,6 +1053,50 @@ class LlamaCppConnector(EngineConnector):
         except Exception:
             return []
 
+    def _get_vocab(self) -> dict:
+        """Get cached ``{token_string: token_id}`` for this GGUF model.
+
+        Used to compute shared-token indices for cross-family projection.
+        Returns an empty dict when the vocabulary cannot be read.
+        """
+        if hasattr(self, "_vocab_cache"):
+            return self._vocab_cache
+
+        try:
+            from ._llamacpp_compat import extract_gguf_vocab
+
+            vocab = extract_gguf_vocab(self._model_path)
+        except Exception as e:  # noqa: BLE001 - degrade to same-vocab path
+            logger.warning("Cannot load GGUF vocab for projection: %s", e)
+            vocab = {}
+        self._vocab_cache = vocab
+        return vocab
+
+    @staticmethod
+    def _embedding_scale_for(family: str, n_embd: int) -> float:
+        """Scale factor a model applies to input token embeddings.
+
+        llama.cpp applies architecture-specific scaling (Gemma and T5 use
+        ``sqrt(n_embd)``) when building the graph from token ids, but **not**
+        when embeddings are injected directly via ``batch.embd``.  A soft
+        prompt must be pre-scaled to match, or the model sees a mis-scaled
+        prefix and cannot read it.
+        """
+        fam = (family or "").lower()
+        if n_embd and fam.startswith(("gemma", "t5")):
+            import numpy as np
+
+            return float(np.sqrt(n_embd))
+        return 1.0
+
+    def _embedding_scale(self) -> float:
+        """Return this model's input-embedding scale factor."""
+        family = getattr(self, "_model_family", "")
+        if not family:
+            meta = getattr(self._model, "metadata", None) or {}
+            family = meta.get("general.architecture", "")
+        return self._embedding_scale_for(family, self._n_embd)
+
     def _get_embed_weight(self) -> tuple:
         """Get cached embedding weight matrix and target norm as numpy arrays.
 
@@ -1121,39 +1201,76 @@ class LlamaCppConnector(EngineConnector):
         return sampler
 
     def _project_rosetta(self, hidden: Any, source: "LlamaCppConnector") -> Any:
-        """Project hidden state from source to target model space.
+        """Project source hidden state(s) into this (target) model's space.
 
-        Extracts embedding weights from both GGUF files and uses
-        vocabulary-mediated projection (same algorithm as HuggingFace
-        connector). Requires the ``gguf`` package for dequantization.
+        * **Same vocabulary** (e.g. two Qwen sizes) →
+          :func:`vocabulary_mediated_projection`, using the connector's cached
+          full embedding matrices.
+        * **Different vocabularies** (e.g. BPE vs SentencePiece) → a cached
+          :class:`~avp.rosetta.gguf_map.GGUFProjectionMap`, projected with
+          either ``vocab_overlap`` or the anchor-fitted ``linear`` method
+          (``self._projection_method``).  The map is built once per model pair
+          and reused, so the dequantization tax is paid only on first use.
 
-        Returns a numpy array.
+        Returns a numpy array ``[..., D_tgt]``.
+
+        Raises:
+            ProjectionError: If embedding weights cannot be loaded or the two
+                vocabularies have too little overlap.
         """
         import numpy as np
+
+        from ..errors import ProjectionError
+        from ..rosetta.gguf_map import get_or_build_map
         from ..rosetta.project import vocabulary_mediated_projection
 
-        # Use cached embed weights (numpy arrays) from both connectors
-        tgt_weight, target_norm = self._get_embed_weight()
-        src_weight, _ = source._get_embed_weight()
+        src_vocab = source._get_vocab()
+        tgt_vocab = self._get_vocab()
 
-        if tgt_weight is None:
-            logger.warning("Cannot load target embed weights for rosetta")
-            return hidden
-        if src_weight is None:
-            logger.warning("Cannot load source embed weights for rosetta")
-            return hidden
+        # --- Same vocabulary: mediated projection over the whole vocab ---
+        if src_vocab and tgt_vocab and src_vocab == tgt_vocab:
+            tgt_weight, target_norm = self._get_embed_weight()
+            src_weight, _ = source._get_embed_weight()
+            if tgt_weight is None or src_weight is None:
+                raise ProjectionError(
+                    "Cannot load embedding weights for vocabulary-mediated projection "
+                    f"({source._model_path!r} -> {self._model_path!r})"
+                )
+            projected = vocabulary_mediated_projection(
+                hidden,
+                src_weight,
+                tgt_weight,
+                temperature=1.0,
+                target_norm=target_norm,
+            )
+            logger.info(
+                "Rosetta (vocab-mediated): [%s] -> [%s]",
+                tuple(np.shape(hidden)), tuple(projected.shape),
+            )
+            return projected
 
-        projected = vocabulary_mediated_projection(
-            hidden,
-            src_weight,
-            tgt_weight,
-            temperature=1.0,
-            target_norm=target_norm,
+        # --- Different vocabularies: cached shared-token map ---
+        projection = get_or_build_map(
+            source._model_path,
+            self._model_path,
+            source._model_hash,
+            self._model_hash,
+            src_vocab,
+            tgt_vocab,
+            ridge=self._projection_ridge,
         )
+        if projection is None:
+            raise ProjectionError(
+                "Insufficient vocabulary overlap for cross-model projection "
+                f"({len(src_vocab)} vs {len(tgt_vocab)} tokens; need >= 100 shared). "
+                f"Source={source._model_path!r}, target={self._model_path!r}."
+            )
 
+        projected = projection.project(hidden, method=self._projection_method)
         logger.info(
-            "Rosetta projection: [%d] -> [%d], norm=%.3f",
-            hidden.shape[-1], projected.shape[-1],
+            "Rosetta (%s): %d shared tokens, [%s] -> [%s], norm=%.3f",
+            self._projection_method, projection.overlap_count,
+            tuple(np.shape(hidden)), tuple(np.shape(projected)),
             float(np.linalg.norm(projected)),
         )
         return projected
@@ -1324,6 +1441,7 @@ class LlamaCppConnector(EngineConnector):
         ctx: Any,
         n_past: int,
         steps: int = 20,
+        state_callback: Callable[[Any], None] | None = None,
     ) -> Tuple[Optional[Any], int]:
         """Run N latent consolidation steps on a caller-owned context.
 
@@ -1412,6 +1530,8 @@ class LlamaCppConnector(EngineConnector):
             new_hidden = self._get_embeddings(lc, ctx_ptr, n_embd)
             if new_hidden is not None:
                 hidden = new_hidden
+                if state_callback is not None:
+                    state_callback(np.array(hidden, dtype=np.float32, copy=True))
 
         hidden = np.ascontiguousarray(
             normalize_to_target(hidden, target_norm), dtype=np.float32,

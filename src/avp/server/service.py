@@ -72,6 +72,8 @@ class ServerConfig:
         n_gpu_layers: llama.cpp layers to offload (``0`` = CPU only).  ``None``
             leaves the connector default (``-1``, all layers).
         n_ctx: llama.cpp context window.  ``None`` leaves the connector default.
+        projection_method: GGUF cross-model projection, ``"vocab_overlap"`` or
+            ``"linear"``.
     """
 
     default_model: str = ""
@@ -86,6 +88,7 @@ class ServerConfig:
     token: str | None = None
     n_gpu_layers: int | None = None
     n_ctx: int | None = None
+    projection_method: str = "vocab_overlap"
 
 
 class LatentService:
@@ -104,6 +107,7 @@ class LatentService:
             backend_kwargs={
                 "n_gpu_layers": self.config.n_gpu_layers,
                 "n_ctx": self.config.n_ctx,
+                "projection_method": self.config.projection_method,
             },
         )
         self.registry = registry or ContextRegistry(

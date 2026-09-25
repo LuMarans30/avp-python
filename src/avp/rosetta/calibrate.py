@@ -75,6 +75,37 @@ def _count_vocab_overlap(
     return count if count >= min_overlap else 0
 
 
+def compute_vocab_overlap_from_dicts(
+    src_vocab: Dict[str, int],
+    tgt_vocab: Dict[str, int],
+    min_overlap: int = 100,
+) -> Any:
+    """Find tokens shared between two ``{token: id}`` maps.
+
+    Returns ``(src_indices, tgt_indices, shared_tokens)`` sorted by token
+    string, or ``None`` when the overlap is below ``min_overlap``.  Works for
+    any token source that can expose a token→id map (HuggingFace tokenizers,
+    GGUF metadata, ...).
+    """
+    import numpy as np
+
+    if not src_vocab or not tgt_vocab:
+        return None
+
+    shared_tokens = sorted(set(src_vocab) & set(tgt_vocab))
+    if len(shared_tokens) < min_overlap:
+        return None
+
+    src_ids = [src_vocab[t] for t in shared_tokens]
+    tgt_ids = [tgt_vocab[t] for t in shared_tokens]
+
+    return (
+        np.array(src_ids, dtype=np.intp),
+        np.array(tgt_ids, dtype=np.intp),
+        shared_tokens,
+    )
+
+
 def _compute_vocab_overlap(
     source_tokenizer: Any,
     target_tokenizer: Any,
@@ -85,22 +116,16 @@ def _compute_vocab_overlap(
     Returns (src_indices, tgt_indices, shared_tokens) sorted by token string,
     or None if overlap count is below min_overlap.
     """
-    import numpy as np
-
-    if _count_vocab_overlap(source_tokenizer, target_tokenizer, min_overlap) == 0:
+    if not (
+        hasattr(source_tokenizer, "get_vocab")
+        and hasattr(target_tokenizer, "get_vocab")
+    ):
         return None
 
-    src_vocab = source_tokenizer.get_vocab()
-    tgt_vocab = target_tokenizer.get_vocab()
-
-    shared_tokens = sorted(set(src_vocab) & set(tgt_vocab))
-    src_ids = [src_vocab[t] for t in shared_tokens]
-    tgt_ids = [tgt_vocab[t] for t in shared_tokens]
-
-    return (
-        np.array(src_ids, dtype=np.intp),
-        np.array(tgt_ids, dtype=np.intp),
-        shared_tokens,
+    return compute_vocab_overlap_from_dicts(
+        source_tokenizer.get_vocab(),
+        target_tokenizer.get_vocab(),
+        min_overlap,
     )
 
 

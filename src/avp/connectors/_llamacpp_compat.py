@@ -107,3 +107,32 @@ def extract_gguf_embedding_weights(model_path: str) -> Any:
         )
 
     return result
+
+
+def extract_gguf_vocab(model_path: str) -> dict:
+    """Return a ``{token_string: token_id}`` map from GGUF metadata.
+
+    Reads the ``tokenizer.ggml.tokens`` array.  The map is used to find
+    shared-token indices for cross-family Rosetta projection.  When a token
+    string appears more than once, the first (lowest) id wins.
+
+    Args:
+        model_path: Path to the GGUF model file.
+
+    Returns:
+        Dict mapping token strings to their ids.
+
+    Raises:
+        ValueError: If the GGUF file has no token list.
+    """
+    from gguf import GGUFReader
+
+    reader = GGUFReader(model_path)
+    field = reader.fields.get("tokenizer.ggml.tokens")
+    if field is None:
+        raise ValueError(f"tokenizer.ggml.tokens not found in {model_path}")
+
+    vocab: dict = {}
+    for token_id, token in enumerate(field.contents()):
+        vocab.setdefault(token, token_id)
+    return vocab

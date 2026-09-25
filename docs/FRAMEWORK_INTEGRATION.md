@@ -78,6 +78,13 @@ answer = solver.generate("Solve it", context=context, source=researcher, cross_m
 
 No torch required. Projection math uses numpy only.
 
+The cross-model projection is chosen automatically from the two GGUF vocabularies: vocabulary-mediated when the token maps match (e.g. two Qwen sizes), and a shared-token projection when they differ (e.g. BPE ↔ SentencePiece). Projection artifacts are built once per model pair and cached under `$AVP_CACHE_DIR/gguf_maps`, so the embedding dequantization is a one-time cost. Pick the method with `--projection-method` on `avp-server`:
+
+* `vocab_overlap` (default) — softmax over shared-token logits.
+* `linear` — a ridge-regression map fitted on paired shared-token embeddings; measurably better alignment on held-out tokens.
+
+Cross-model transfer carries a **projected hidden trajectory** (the per-step latent states, or a single vector when unavailable), so it suits structured reasoning (math, code) better than verbatim recall. See **[Cross-Model Transfer](CROSS_MODEL_TRANSFER.md)** for the measured limits.
+
 ### vLLM – `pip install avp[vllm]`
 
 vLLM integration uses two engine plugins: a KV connector for multi-agent cache transfer and a model plugin for latent thinking steps during prefill. Supports Qwen2, Llama, Mistral, and Gemma architectures.
@@ -248,6 +255,25 @@ graph.set_finish_point("solver")
 app = graph.compile()
 result = app.invoke({"query": "What is 24 * 17 + 3?"})
 ```
+
+---
+
+## Latent Server (MCP + HTTP)
+
+When several agents or sub-agents share one model-resident process, run the persistent daemon instead of loading models per call. It exposes `latent_think` / `latent_generate` over FastMCP (`POST /mcp`) and a plain JSON/HTTP mirror (`/api/*`), keeps latent `AVPContext`s in a VRAM registry keyed by `context_id`, and routes same-model contexts through the KV-cache and cross-model contexts through in-process Rosetta Stone projection.
+
+```bash
+pip install "avp[mcp]"
+
+avp-server \
+  --host 127.0.0.1 --port 8765 \
+  --default-model Qwen/Qwen2.5-7B-Instruct \
+  --device cuda --max-contexts 8 --ttl 300
+```
+
+Any MCP-speaking framework can call the four tools — `latent_think`, `latent_generate`, `latent_status`, `latent_release` — and pass a short `context_id` instead of text. Frameworks without MCP support (Pi) use the HTTP mirror; the bundled [Pi extension](../pi-extension/) registers the same two tools and an `/avp-status` command. Because the daemon already holds every connector, cross-model projection needs no source model on the caller side and the `context_id` is a registry key, not a serialized blob.
+
+Full CLI flags, request/response bodies, error codes, resource limits, and Docker/systemd deployment live in **[Latent Server (MCP + Pi)](LATENT_SERVER.md)**.
 
 ---
 

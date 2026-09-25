@@ -45,6 +45,13 @@ class AVPContext:
     last_hidden_state: Any = None
     """Last hidden state [1, D] from think() for cross-model projection."""
 
+    hidden_states: Any = None
+    """Optional per-step hidden states [S, D] collected during think().
+
+    When present, cross-model projection can transfer a short trajectory
+    instead of a single vector.  ``last_hidden_state`` remains available for
+    callers that expect a single vector."""
+
     @property
     def payload_type(self) -> "PayloadType":
         """The effective payload type of this context."""

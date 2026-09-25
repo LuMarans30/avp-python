@@ -324,6 +324,7 @@ def _config_from_args(args: argparse.Namespace) -> ServerConfig:
         token=args.token or os.environ.get("AVP_DAEMON_TOKEN"),
         n_gpu_layers=args.n_gpu_layers,
         n_ctx=args.n_ctx,
+        projection_method=args.projection_method,
     )
 
 
@@ -357,6 +358,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=None,
         help="llama.cpp context window size.",
+    )
+    parser.add_argument(
+        "--projection-method",
+        default="vocab_overlap",
+        choices=["vocab_overlap", "linear"],
+        help="GGUF cross-model projection method (default: vocab_overlap).",
     )
     parser.add_argument("--allowed-models", default="")
     parser.add_argument("--token", default="")
