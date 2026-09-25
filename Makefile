@@ -1,5 +1,8 @@
 .PHONY: proto test lint clean install
 
+# Regenerate avp_pb2.py. Keep grpcio-tools on the 5.29 gencode line
+# (>=1.71.2,<1.72): the autogen extra pins protobuf to 5.29.x, so a
+# newer protoc would emit gencode the runtime refuses to load.
 proto:
 	python -m grpc_tools.protoc \
 		-I proto \

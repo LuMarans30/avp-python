@@ -4,6 +4,16 @@ All notable changes to the AVP Python SDK are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+
+- **Minimum `protobuf` raised to `>=5.29`** (from `>=4.21`) to match the regenerated gencode. Environments pinned to `protobuf` 4.21–5.28 must upgrade; protobuf 4.x is end-of-life.
+
+### Fixed
+
+- **Protobuf gencode/runtime mismatch** — the checked-in `avp_pb2.py` carried gencode 6.31.1, whose runtime guard rejects any `protobuf` older than 6.31.1, while `pyproject.toml` required only `>=4.21`. Every environment constrained below 6.31.1 failed at `import avp`, including `avp[all]`, where `autogen-core` requires `protobuf~=5.29.3`. Regenerated with protoc 5.29 (gencode 5.29.0). `grpcio-tools` is pinned to `>=1.71.2,<1.72` (1.72+ needs `protobuf>=6.30`, which cannot coexist with `autogen-core`'s pin) so a later `make proto` cannot reintroduce the mismatch. Also drops the dead `EMBEDDING` value that v0.5.0 removed from `proto/avp.proto` but never from the generated module.
+
 ## [0.6.2] - 2026-04-26
 
 ### Added
