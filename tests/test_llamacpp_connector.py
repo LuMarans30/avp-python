@@ -23,3 +23,32 @@ class TestLlamaCppImportGuard:
             LlamaCppConnector("nonexistent.gguf")
 
 
+class TestBlockCountExtraction:
+    """GGUF layer-count parsing (no model required)."""
+
+    def test_prefers_exact_block_count_over_leading_dense(self):
+        from avp.connectors.llamacpp import LlamaCppConnector
+
+        meta = {
+            "general.architecture": "bailingmoe3",
+            "bailingmoe3.leading_dense_block_count": "1",
+            "bailingmoe3.block_count": "24",
+        }
+        assert LlamaCppConnector._extract_block_count(meta) == 24
+
+    def test_falls_back_to_generic_key(self):
+        from avp.connectors.llamacpp import LlamaCppConnector
+
+        assert LlamaCppConnector._extract_block_count({"block_count": "12"}) == 12
+
+    def test_returns_none_when_absent(self):
+        from avp.connectors.llamacpp import LlamaCppConnector
+
+        assert LlamaCppConnector._extract_block_count({}) is None
+
+    def test_handles_non_numeric_value(self):
+        from avp.connectors.llamacpp import LlamaCppConnector
+
+        assert LlamaCppConnector._extract_block_count({"block_count": "lots"}) is None
+
+

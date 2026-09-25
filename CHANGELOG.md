@@ -4,6 +4,12 @@ All notable changes to the AVP Python SDK are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- **GGUF transformer block count** — `LlamaCppConnector` now resolves `<arch>.block_count` exactly instead of matching the first key containing `block_count`, which could bind to `<arch>.leading_dense_block_count` and under-report the layer count (e.g. on Gemma). `ModelIdentity` also reports `model_family` from `general.architecture`.
+
 ## [0.6.2] - 2026-04-26
 
 ### Added

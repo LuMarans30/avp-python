@@ -143,19 +143,13 @@ class LlamaCppConnector(EngineConnector):
         # Extract model identity
         self._n_embd = self._model.n_embd()
         self._n_vocab = self._model.n_vocab()
-        self._n_layer = None
         meta = self._model.metadata or {}
-        for key, val in meta.items():
-            if "block_count" in key:
-                try:
-                    self._n_layer = int(val)
-                except (ValueError, TypeError):
-                    pass
-                break
+        self._model_family = meta.get("general.architecture", "")
+        self._n_layer = self._extract_block_count(meta)
 
         # Compute model hash from GGUF metadata for compatibility checks
         from ..handshake import compute_model_hash
-        arch = meta.get("general.architecture", "")
+        arch = self._model_family
         self._model_hash = compute_model_hash({
             "architectures": [arch] if arch else [],
             "hidden_size": self._n_embd,
@@ -167,6 +161,29 @@ class LlamaCppConnector(EngineConnector):
             "LlamaCppConnector loaded: %s (n_embd=%d, n_vocab=%d, n_layer=%s)",
             model_path, self._n_embd, self._n_vocab, self._n_layer,
         )
+
+    @staticmethod
+    def _extract_block_count(meta: dict) -> Optional[int]:
+        """Return the total transformer block count from GGUF metadata.
+
+        GGUF exposes both ``<arch>.block_count`` and
+        ``<arch>.leading_dense_block_count``.  A naive substring match picks
+        the latter and reports too few layers, so prefer the exact key.
+        """
+        arch = meta.get("general.architecture", "")
+        for key in (f"{arch}.block_count", "block_count"):
+            if key in meta:
+                try:
+                    return int(meta[key])
+                except (TypeError, ValueError):
+                    return None
+        for key, value in meta.items():
+            if key == "block_count" or key.endswith(".block_count"):
+                try:
+                    return int(value)
+                except (TypeError, ValueError):
+                    return None
+        return None
 
     @classmethod
     def from_pretrained(
@@ -1160,6 +1177,7 @@ class LlamaCppConnector(EngineConnector):
         return ModelIdentity(
             model_id=self._model_path,
             model_hash=self._model_hash,
+            model_family=self._model_family,
             hidden_dim=self._n_embd,
             num_layers=self._n_layer or 0,
         )
