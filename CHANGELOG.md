@@ -4,6 +4,12 @@ All notable changes to the AVP Python SDK are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- **`LlamaCppConnector.generate(do_sample=...)`** — the parameter is now accepted and mapped to greedy decoding (`temperature=0`). Previously it fell through `**kwargs` into `llama_cpp.Llama.__call__` and raised `TypeError` on the text-fallback path.
+
 ## [0.6.2] - 2026-04-26
 
 ### Added

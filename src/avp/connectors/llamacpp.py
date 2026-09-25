@@ -506,6 +506,7 @@ class LlamaCppConnector(EngineConnector):
         max_new_tokens: Optional[int] = None,
         temperature: float = 0.7,
         top_p: float = 0.95,
+        do_sample: bool = True,
         grammar: Optional[str] = None,
         keep_context: bool = False,
         **kwargs: Any,
@@ -543,6 +544,10 @@ class LlamaCppConnector(EngineConnector):
         # ABC compatibility: max_new_tokens takes precedence
         if max_new_tokens is not None:
             max_tokens = max_new_tokens
+        if not do_sample:
+            # llama.cpp samplers switch to greedy at temperature 0
+            temperature = 0.0
+            top_p = 1.0
 
         # Strip AVP-internal kwargs before forwarding
         kwargs.pop("_diagnostics", None)
