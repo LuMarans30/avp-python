@@ -1,0 +1,60 @@
+# systemd unit for the AVP latent server.
+#
+# Install: see deploy/README.md. Summary:
+#   1. Create a system user and a venv with `pip install "avp[mcp]"`.
+#   2. cp avp-server.service /etc/systemd/system/
+#   3. cp avp-server.env.example /etc/avp/avp-server.env && edit + chmod 600
+#   4. systemctl daemon-reload && systemctl enable --now avp-server
+#
+# The CLI arguments come from $AVP_SERVER_ARGS in the environment file so this
+# unit does not need editing when the model set changes.
+
+[Unit]
+Description=AVP latent server (MCP + HTTP)
+Documentation=https://github.com/VectorArc/avp-python/blob/main/docs/LATENT_SERVER.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=avp
+Group=avp
+StateDirectory=avp
+WorkingDirectory=/var/lib/avp
+
+# Secrets and CLI args. `-` makes the file optional.
+EnvironmentFile=-/etc/avp/avp-server.env
+Environment=HF_HOME=/var/lib/avp/huggingface
+Environment=AVP_CACHE_DIR=/var/lib/avp/cache
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+
+ExecStart=/opt/avp/venv/bin/avp-server $AVP_SERVER_ARGS
+
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=30
+LimitNOFILE=65536
+
+# GPU device access: uncomment and set your distro's device group(s). This is
+# fatal if the named group does not exist, so it is opt-in. Do not enable
+# PrivateDevices.
+# SupplementaryGroups=video render
+
+# Hardening. /var/lib/avp is the only writable path (StateDirectory).
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectClock=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadWritePaths=/var/lib/avp
+
+[Install]
+WantedBy=multi-user.target

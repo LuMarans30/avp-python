@@ -23,3 +23,7 @@ pytest-of-*/
 benchmarks/results/*.json
 benchmarks/results/*.md
 *.DS_Store
+
+# Node / Pi extension
+node_modules/
+pi-extension/package-lock.json

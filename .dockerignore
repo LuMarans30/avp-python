@@ -1,0 +1,27 @@
+# Build context hygiene for the AVP latent server image.
+.git
+.github
+.gitignore
+node_modules
+pi-extension/node_modules
+
+# Python cruft
+**/__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+dist/
+build/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Not needed at runtime
+tests/
+notebooks/
+benchmarks/results/
+pi-extension/
+*.DS_Store
+**/.env

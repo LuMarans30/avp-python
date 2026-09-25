@@ -1,0 +1,21 @@
+# GPU override. Requires the NVIDIA Container Toolkit on the host.
+#
+# Build/run with a CUDA base image that already ships torch:
+#   AVP_BASE_IMAGE=pytorch/pytorch:2.4.0-cuda12.4-cudnn9-runtime \
+#     docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build
+
+services:
+  avp-server:
+    build:
+      # The CUDA base already ships torch; do not pull a CPU wheel over it.
+      args:
+        TORCH_INDEX_URL: ""
+    environment:
+      NVIDIA_VISIBLE_DEVICES: ${NVIDIA_VISIBLE_DEVICES:-all}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

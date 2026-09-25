@@ -1,0 +1,20 @@
+{
+  "name": "pi-avp-latent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Pi extension exposing latent_think / latent_generate backed by an AVP FastMCP daemon.",
+  "keywords": ["pi-package"],
+  "pi": {
+    "extensions": ["extensions/avp-latent.ts"]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-agent-core": "*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.0"
+  }
+}

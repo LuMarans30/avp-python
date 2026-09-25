@@ -48,8 +48,10 @@ autogen = ["avp[hf]", "autogen-core>=0.4"]
 # Reference transport binding
 transport = ["httpx[http2]>=0.25"]
 server = ["avp[transport]", "fastapi>=0.104", "uvicorn[standard]>=0.24"]
+# Persistent latent daemon: FastMCP + plain HTTP surface for Pi
+mcp = ["avp[hf]", "fastmcp>=2.0"]
 # Convenience bundles
-all = ["avp[hf,llamacpp,langchain,crewai,autogen,transport,server]"]
+all = ["avp[hf,llamacpp,langchain,crewai,autogen,transport,server,mcp]"]
 # Development
 benchmark = ["avp[hf]", "datasets>=2.14"]
 dev = [
@@ -57,8 +59,13 @@ dev = [
     "pytest>=7.0",
     "pytest-asyncio>=0.21",
     "ruff>=0.1",
+    # Needed so tests/test_server_daemon.py is not skipped by importorskip.
+    "fastmcp>=2.0",
     "grpcio-tools>=1.59",
 ]
+
+[project.scripts]
+avp-server = "avp.server.daemon:main"
 
 [project.entry-points."vllm.general_plugins"]
 avp_latent = "avp.connectors.vllm_model_plugin:register"

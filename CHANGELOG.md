@@ -6,6 +6,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow 
 
 ## [Unreleased]
 
+### Added
+
+- **Latent server (`avp.server`)** — persistent, model-resident daemon exposing `latent_think` / `latent_generate` over FastMCP (`/mcp`) and a plain JSON/HTTP mirror (`/api/*`). Keeps latent `AVPContext`s in a thread-safe VRAM registry keyed by `context_id`; routes same-model contexts through the KV-cache and cross-model contexts through in-process Rosetta Stone projection. Includes TTL + LRU eviction, per-model inference locks, bearer-token auth on every route except `/health` (so `/mcp` is covered too), and an allowlist. New `avp-server` console script and `avp[mcp]` extra. See `docs/LATENT_SERVER.md`.
+- **Pi extension (`pi-extension/`)** — registers `latent_think` and `latent_generate` tools (plus `/avp-status`) that talk to the latent server's HTTP surface. Lets Pi sub-agents pass `context_id`s instead of text. Requires no MCP support from Pi.
+- **Deployment assets (`deploy/`)** — `Dockerfile` (CPU default, CUDA base override), `docker-compose.yml` with a GPU override, and a hardened `avp-server.service` systemd unit plus env templates. See `deploy/README.md`.
+- **`avp-server` llama.cpp flags** — `--n-gpu-layers` and `--n-ctx` expose the backend's offload/context settings (needed for models larger than VRAM).
+
 ### Fixed
 
 - **`LlamaCppConnector.generate(do_sample=...)`** — the parameter is now accepted and mapped to greedy decoding (`temperature=0`). Previously it fell through `**kwargs` into `llama_cpp.Llama.__call__` and raised `TypeError` on the text-fallback path.

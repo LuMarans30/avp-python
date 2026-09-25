@@ -1,0 +1,51 @@
+# CPU/base compose file. For GPU, layer the override:
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build
+#
+# Copy deploy/.env.example to deploy/.env and set AVP_DAEMON_TOKEN first.
+
+name: avp
+
+services:
+  avp-server:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      args:
+        BASE_IMAGE: ${AVP_BASE_IMAGE:-python:3.12-slim}
+        TORCH_INDEX_URL: ${AVP_TORCH_INDEX_URL:-https://download.pytorch.org/whl/cpu}
+    image: avp-server:${AVP_IMAGE_TAG:-local}
+    command:
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8765"
+      - --default-model
+      - ${AVP_DEFAULT_MODEL:-Qwen/Qwen2.5-7B-Instruct}
+      - --max-contexts
+      - "${AVP_MAX_CONTEXTS:-8}"
+      - --ttl
+      - "${AVP_TTL:-300}"
+    environment:
+      AVP_DAEMON_TOKEN: ${AVP_DAEMON_TOKEN:?set AVP_DAEMON_TOKEN in deploy/.env}
+      HF_HOME: /data/huggingface
+      AVP_CACHE_DIR: /data/avp
+      HF_TOKEN: ${HF_TOKEN:-}
+    ports:
+      - "${AVP_BIND_ADDR:-127.0.0.1}:8765:8765"
+    volumes:
+      - avp-data:/data
+    shm_size: "2gb"
+    restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request, sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8765/health', timeout=3).status == 200 else 1)"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+
+volumes:
+  avp-data:
