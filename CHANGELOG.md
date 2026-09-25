@@ -4,6 +4,12 @@ All notable changes to the AVP Python SDK are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+
+- **Engine dependency floors** — `avp[hf]` now requires `transformers>=5.10.4` and `avp[vllm]` requires `vllm>=0.29.0` (with `huggingface-hub>=1.5,<2`). The previous floors were unsatisfiable together: every vLLM release below 0.29 requires `transformers<5,>=4.56.0`, while `avp[hf]` requires `transformers>=5.0`, so `avp[hf,vllm]` had no solution and `avp[vllm]` on its own forced the transformers 4.x stack that the connectors no longer target. vLLM 0.29.0 and later require `transformers>=5.10.4`, which is the floor adopted here, so a single transformers version satisfies both extras.
+
 ## [0.6.2] - 2026-04-26
 
 ### Added

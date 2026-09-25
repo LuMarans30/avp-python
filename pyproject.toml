@@ -36,9 +36,9 @@ Changelog = "https://github.com/VectorArc/avp-python/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 # Engine connectors (pick one or more)
-hf = ["torch>=2.0", "transformers>=5.0"]
+hf = ["torch>=2.0", "transformers>=5.10.4"]
 huggingface = ["avp[hf]"]
-vllm = ["vllm>=0.17.0,<0.19.0", "safetensors>=0.4", "huggingface-hub>=1.0"]
+vllm = ["vllm>=0.29.0", "safetensors>=0.4", "huggingface-hub>=1.5,<2"]
 llamacpp = ["llama-cpp-python>=0.3", "gguf>=0.6"]
 ollama = ["llama-cpp-python>=0.3", "gguf>=0.6"]
 # Framework integrations (each requires HF engine)
